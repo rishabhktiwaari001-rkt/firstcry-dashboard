@@ -1,6 +1,23 @@
+You've got it. I have added the **Category Filter Tab** and the **Staff Ranking System** to the dashboard.
+
+### 🌟 New Features Added
+
+1. **🔍 Category & Sub-Category Tab:**
+* You can now select a specific Category (e.g., "Fashion") and even deeper (e.g., "T-Shirts").
+* It instantly shows you a leaderboard of **who sold the most** in that specific category.
+
+
+2. **🏆 Staff Rankings:**
+* I added a **"Rank"** column to the main dashboard.
+* It automatically sorts staff by **Total Sales (GSV)** so you can see who is #1, #2, etc.
+
+
+
+Here is the **Final Complete Code**. Replace your `app.py` content with this.
+
+```python
 import streamlit as st
 import pandas as pd
-import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="FirstCry Master Dashboard (GSV)", layout="wide")
@@ -12,6 +29,12 @@ st.markdown("Upload **Article Sale Report** to generate the performance tracker.
 with st.sidebar:
     st.header("📂 Data Upload")
     article_file = st.file_uploader("Upload Article Sale Report (CSV)", type=['csv'])
+    
+    st.markdown("---")
+    st.success("✅ **Active Logic:**")
+    st.caption("1. **All Metrics:** Based on **GSV**.")
+    st.caption("2. **Rankings:** Auto-calculated on Total Sales.")
+    st.caption("3. **Exclusions:** 'Free Sample Category' removed.")
 
 # --- MAIN LOGIC ---
 if article_file:
@@ -38,17 +61,10 @@ if article_file:
             st.error("🚨 Date Error: Could not read dates. Check your CSV format.")
             st.stop()
 
-        # --- NEW WEEK LOGIC (RETAIL MONTH STYLE) ---
-        # Week 1: Days 1-7
-        # Week 2: Days 8-14
-        # Week 3: Days 15-21
-        # Week 4: Days 22-End
+        # --- RETAIL WEEK LOGIC (1-7, 8-14, etc.) ---
         df['Day_Num'] = df['BillDate'].dt.day
         df['Week'] = (df['Day_Num'] - 1) // 7 + 1
-        
-        # Cap week at 4 or 5 depending on preference, but 1-7 logic naturally produces 1,2,3,4,5
         df['Week_Label'] = "Week " + df['Week'].astype(str)
-        
         df['Day'] = df['BillDate'].dt.strftime('%A')
         
         # 4. SEPARATE STREAMS
@@ -85,19 +101,39 @@ if article_file:
         master_df['AUPT'] = (master_df['Total_Qty'] / master_df['Total_Bills']).round(2)
         master_df['Single_Bill_%'] = ((master_df['Single_Bills'] / master_df['Total_Bills']) * 100).round(1)
 
-        # --- VISUALS ---
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Incentives (GSV)", "💳 Memberships", "📅 Sales Reports", "⚠️ Single Bills"])
+        # ADD RANKING (Based on Total GSV)
+        master_df = master_df.sort_values('Total_GSV', ascending=False).reset_index(drop=True)
+        master_df.index = master_df.index + 1  # Start rank at 1
+        master_df['Rank'] = master_df.index
 
+        # Reorder columns to put Rank first
+        cols = ['Rank', 'SalesPerson', 'Total_GSV', 'Total_Qty', 'Total_Bills', 'AVPT', 'AUPT', 'Single_Bills', 'Single_Bill_%']
+        master_df = master_df[cols]
+
+        # --- VISUALS ---
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "🏆 Rankings & Incentives", 
+            "🔍 Category Analysis", 
+            "💳 Membership Hub", 
+            "📅 Sales Reports", 
+            "⚠️ Single Bills"
+        ])
+
+        # TAB 1: RANKINGS & INCENTIVES
         with tab1:
-            st.subheader("🏆 Staff Incentives (GSV Based)")
-            st.dataframe(master_df.style.format({'Total_GSV': '₹{:.2f}', 'AVPT': '₹{:.0f}'}), use_container_width=True)
+            st.subheader("🏆 Staff Rankings (Based on GSV)")
+            st.markdown("Sorted by **Highest Total Sales**")
+            
+            st.dataframe(
+                master_df.style.format({'Total_GSV': '₹{:.2f}', 'AVPT': '₹{:.0f}'}), 
+                use_container_width=True
+            )
             
             st.markdown("---")
             st.write("### 🎯 Weekly Incentive Qualifiers (Current Week)")
             
-            # Use the NEW Retail Week logic
-            current_week = df['Week'].max() # Gets the highest week number available (e.g., 1)
-            
+            # Weekly Logic
+            current_week = df['Week'].max()
             weekly_df = df_sales[df_sales['Week'] == current_week]
             
             if not weekly_df.empty:
@@ -122,24 +158,67 @@ if article_file:
             else:
                 st.info("No data for current week.")
 
+        # TAB 2: CATEGORY ANALYSIS (NEW!)
         with tab2:
+            st.subheader("🔍 Category & Sub-Category Performance")
+            
+            col_cat, col_sub = st.columns(2)
+            
+            # 1. Category Filter
+            cats = ['All'] + sorted(df_sales['Category'].unique().tolist())
+            selected_cat = col_cat.selectbox("Select Category", cats)
+            
+            # 2. Sub-Category Filter (Dependent on Category)
+            if selected_cat != 'All':
+                sub_cats = ['All'] + sorted(df_sales[df_sales['Category'] == selected_cat]['SubCategory'].unique().tolist())
+            else:
+                sub_cats = ['All'] # No sub-cats if 'All' is selected
+            
+            selected_sub = col_sub.selectbox("Select Sub-Category", sub_cats)
+            
+            # 3. Filter Data
+            filtered_df = df_sales.copy()
+            if selected_cat != 'All':
+                filtered_df = filtered_df[filtered_df['Category'] == selected_cat]
+            if selected_sub != 'All':
+                filtered_df = filtered_df[filtered_df['SubCategory'] == selected_sub]
+            
+            # 4. Display Stats
+            if not filtered_df.empty:
+                st.write(f"Showing data for: **{selected_cat}** > **{selected_sub}**")
+                
+                cat_stats = filtered_df.groupby('SalesPerson').agg(
+                    Sales_GSV=('GSV', 'sum'),
+                    Qty_Sold=('Quantity', 'sum'),
+                    Bills_Involved=('InvoiceNumber', 'nunique')
+                ).reset_index().sort_values('Sales_GSV', ascending=False)
+                
+                cat_stats.reset_index(drop=True, inplace=True)
+                cat_stats.index += 1
+                cat_stats.index.name = 'Rank'
+                
+                st.dataframe(cat_stats.style.format({'Sales_GSV': '₹{:.2f}'}), use_container_width=True)
+            else:
+                st.warning("No sales found for this selection.")
+
+        # TAB 3: MEMBERSHIPS
+        with tab3:
             st.subheader("💳 Membership Hub")
             if not df_memberships.empty:
                 df_memberships['Price_Tier'] = "₹" + df_memberships['GSV'].astype(str)
                 
-                # Day View
-                st.write("**Day-wise**")
+                st.write("**Day-wise Memberships**")
                 day_mem = df_memberships.groupby(['BillDate', 'Price_Tier']).size().unstack(fill_value=0).sort_index(ascending=False)
                 st.dataframe(day_mem, use_container_width=True)
                 
-                # Week View
-                st.write("**Week-wise**")
+                st.write("**Week-wise Memberships**")
                 week_mem = df_memberships.groupby(['Week_Label', 'Price_Tier']).size().unstack(fill_value=0)
                 st.dataframe(week_mem, use_container_width=True)
             else:
                 st.info("No memberships found.")
 
-        with tab3:
+        # TAB 4: SALES REPORTS
+        with tab4:
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("📅 Day-wise Sales (GSV)")
@@ -151,19 +230,21 @@ if article_file:
                 
             with col2:
                 st.subheader("🗓️ Week-wise Sales (GSV)")
-                # Group by our new Retail Week
                 week_view = df_sales.groupby('Week_Label').agg(
                     Total_GSV=('GSV', 'sum'), 
                     Bills=('InvoiceNumber', 'nunique')
                 ).reset_index()
                 st.dataframe(week_view.style.format({'Total_GSV': '₹{:.2f}'}), use_container_width=True)
 
-        with tab4:
+        # TAB 5: SINGLE BILLS
+        with tab5:
             st.subheader("⚠️ Single Bill Risk")
-            st.dataframe(master_df[['SalesPerson', 'Total_Bills', 'Single_Bills', 'Single_Bill_%']].sort_values('Single_Bill_%', ascending=False).style.format({'Single_Bill_%': '{:.1f}%'}), use_container_width=True)
+            st.dataframe(master_df[['Rank', 'SalesPerson', 'Total_Bills', 'Single_Bills', 'Single_Bill_%']].sort_values('Single_Bill_%', ascending=False).style.format({'Single_Bill_%': '{:.1f}%'}), use_container_width=True)
 
     except Exception as e:
         st.error(f"Error: {e}")
         st.write("Columns found:", df.columns.tolist() if 'df' in locals() else "None")
 else:
     st.info("Waiting for file upload...")
+
+```
