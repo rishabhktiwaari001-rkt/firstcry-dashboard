@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="FirstCry Dashboard (Safe Mode)", layout="wide")
+st.set_page_config(page_title="FirstCry Dashboard (Final)", layout="wide")
 
 st.title("🛍️ FirstCry Master Dashboard")
 st.markdown("Upload **Article Sale Report** to generate the performance tracker.")
@@ -19,16 +19,15 @@ if article_file:
         # 1. LOAD DATA
         df = pd.read_csv(article_file)
         
-        # 2. CLEAN COLUMN NAMES (Aggressive Cleaning)
+        # 2. CLEAN COLUMN NAMES
         df.columns = df.columns.str.strip()
         
         # Auto-fix Column Name Mismatches
-        # This handles if the file says "SalePerson" instead of "SalesPerson"
         rename_map = {
             'SalePerson': 'SalesPerson', 
             'Date': 'BillDate',
             'Bill Date': 'BillDate',
-            'BillDate': 'BillDate' # Self-map just in case
+            'BillDate': 'BillDate'
         }
         df.rename(columns=rename_map, inplace=True)
 
@@ -38,14 +37,11 @@ if article_file:
         
         if missing_cols:
             st.error(f"🚨 **File Error:** Missing columns: {missing_cols}")
-            st.warning("Please make sure you uploaded the **Article Sale Report** (not the Billwise report).")
+            st.warning("Please make sure you uploaded the **Article Sale Report**.")
             st.stop()
 
         # 4. ROBUST DATE CONVERSION
-        # We try multiple formats to ensure it works
         df['BillDate'] = pd.to_datetime(df['BillDate'], dayfirst=True, errors='coerce')
-        
-        # Drop rows where Date is invalid (NaT)
         df = df.dropna(subset=['BillDate'])
         
         if df.empty:
@@ -107,7 +103,7 @@ if article_file:
         # --- VISUALS ---
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "🏆 Rankings & Incentives", 
-            "🔍 Category Analysis", 
+            "🔍 Category Deep-Dive", 
             "💳 Membership Hub", 
             "📅 Sales Reports", 
             "⚠️ Single Bills"
@@ -120,7 +116,6 @@ if article_file:
             st.markdown("---")
             st.write("### 🎯 Weekly Incentive Qualifiers (Current Week)")
             
-            # Robust Week Calculation
             if not df['Week'].empty:
                 current_week = df['Week'].max()
                 weekly_df = df_sales[df_sales['Week'] == current_week]
@@ -146,10 +141,11 @@ if article_file:
                 else:
                     st.info("No sales data for the current week yet.")
 
+        # --- TAB 2: UPDATED CATEGORY LOGIC ---
         with tab2:
-            st.subheader("🔍 Category Analysis")
+            st.subheader("🔍 Category & Sub-Category Analysis")
             
-            # Safe List Generation
+            # 1. Selectors
             cats = ['All'] + sorted(list(df_sales['Category'].dropna().unique()))
             col_cat, col_sub = st.columns(2)
             selected_cat = col_cat.selectbox("Select Category", cats)
@@ -161,18 +157,41 @@ if article_file:
             
             selected_sub = col_sub.selectbox("Select Sub-Category", sub_cats)
             
-            # Filter Logic
+            # 2. Filter Data
             filtered_df = df_sales.copy()
             if selected_cat != 'All':
                 filtered_df = filtered_df[filtered_df['Category'] == selected_cat]
             if selected_sub != 'All':
                 filtered_df = filtered_df[filtered_df['SubCategory'] == selected_sub]
-                
+
+            # 3. Dynamic Grouping (THE FIX)
             if not filtered_df.empty:
-                cat_stats = filtered_df.groupby('SalesPerson').agg(
-                    Sales_GSV=('GSV', 'sum'), Qty=('Quantity', 'sum')
+                # Decide what columns to show based on filters
+                if selected_cat == 'All':
+                    # If looking at ALL, show Breakdown by Category
+                    group_cols = ['Category', 'SalesPerson']
+                elif selected_sub == 'All':
+                    # If looking at a Category, show Breakdown by SubCategory
+                    group_cols = ['SubCategory', 'SalesPerson']
+                else:
+                    # If looking at specific SubCat, just show Staff
+                    group_cols = ['SalesPerson']
+
+                # Perform Aggregation
+                cat_stats = filtered_df.groupby(group_cols).agg(
+                    Sales_GSV=('GSV', 'sum'),
+                    Qty=('Quantity', 'sum'),
+                    Bills=('InvoiceNumber', 'nunique')
                 ).reset_index().sort_values('Sales_GSV', ascending=False)
+                
+                # Add Rank
+                cat_stats.reset_index(drop=True, inplace=True)
+                cat_stats.index += 1
+                cat_stats.index.name = 'Rank'
+                
+                st.write(f"Showing performance by: **{', '.join(group_cols)}**")
                 st.dataframe(cat_stats.style.format({'Sales_GSV': '₹{:.2f}'}), use_container_width=True)
+                
             else:
                 st.warning("No data found for this selection.")
 
@@ -180,7 +199,6 @@ if article_file:
             st.subheader("💳 Membership Hub")
             if not df_memberships.empty:
                 df_memberships['Price_Tier'] = "₹" + df_memberships['GSV'].astype(str)
-                # Group
                 day_mem = df_memberships.groupby(['BillDate', 'Price_Tier']).size().unstack(fill_value=0).sort_index(ascending=False)
                 st.dataframe(day_mem, use_container_width=True)
             else:
@@ -202,9 +220,8 @@ if article_file:
             st.dataframe(master_df[['Rank', 'SalesPerson', 'Total_Bills', 'Single_Bills', 'Single_Bill_%']].style.format({'Single_Bill_%': '{:.1f}%'}), use_container_width=True)
 
     except Exception as e:
-        # THIS IS THE IMPORTANT PART
         st.error(f"🚨 An error occurred: {e}")
-        st.write("Please send this error message to me so I can fix it!")
+        st.write("Please send this error message to your developer.")
 
 else:
     st.info("Waiting for file...")
