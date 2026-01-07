@@ -3,104 +3,74 @@ import pandas as pd
 import os
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="FirstCry Chowk Store Dashboard", layout="wide")
+st.set_page_config(page_title="FirstCry Store Dashboard", layout="wide")
 
 # --- SIDEBAR: SETTINGS ---
 with st.sidebar:
     st.header("⚙️ Dashboard Settings")
-    st.write("Upload Data File below to start.")
     
-    # DATA UPLOAD (Always required for new reports)
+    # 1. DATA UPLOAD
     article_file = st.file_uploader("Upload Article Sale Report (CSV)", type=['csv'])
+    
+    st.markdown("---")
+    st.write("### 🖼️ Branding (Optional)")
+    st.caption("Place 'logo.png' & 'store.png' in folder for auto-load.")
+    
+    # Fallback Uploads
+    if not os.path.exists("logo.png") and not os.path.exists("logo.jpg"):
+        st.file_uploader("Upload Logo", type=['png', 'jpg'])
+    if not os.path.exists("store.png") and not os.path.exists("store.jpg"):
+        st.file_uploader("Upload Store Photo", type=['png', 'jpg'])
 
-# --- HEADER LOGIC (AUTO-DETECT IMAGES) ---
+# --- HEADER LOGIC ---
 col1, col2, col3 = st.columns([1, 4, 2])
 
-# 1. LOGO HANDLING
+# Logo
 with col1:
-    # Check if 'logo.png' or 'logo.jpg' exists in the folder
-    if os.path.exists("logo.png"):
-        st.image("logo.png", width=150)
-    elif os.path.exists("logo.jpg"):
-        st.image("logo.jpg", width=150)
-    else:
-        # Fallback: Allow upload if file is missing
-        logo_up = st.file_uploader("Upload Logo", type=['png', 'jpg'])
-        if logo_up: st.image(logo_up, width=150)
+    if os.path.exists("logo.png"): st.image("logo.png", width=150)
+    elif os.path.exists("logo.jpg"): st.image("logo.jpg", width=150)
+    else: st.write("📷 *No Logo*")
 
-# 2. TITLE
+# Title
 with col2:
     st.title("🛍️ FirstCry Store Dashboard")
     st.markdown("### Performance & Retail KPIs")
 
-# 3. STORE PHOTO HANDLING
+# Store Photo
 with col3:
-    # Check if 'store.png' or 'store.jpg' exists
-    if os.path.exists("store.png"):
-        st.image("store.png", width=300)
-    elif os.path.exists("store.jpg"):
-        st.image("store.jpg", width=300)
-    else:
-        # Fallback
-        store_up = st.file_uploader("Upload Store Photo", type=['png', 'jpg'])
-        if store_up: st.image(store_up, width=300)
+    if os.path.exists("store.png"): st.image("store.png", width=300)
+    elif os.path.exists("store.jpg"): st.image("store.jpg", width=300)
 
 st.markdown("---")
 
 # --- MAIN LOGIC ---
 if article_file:
     try:
-        # 1. LOAD DATA
+        # 1. LOAD & CLEAN
         df = pd.read_csv(article_file)
-        
-        # 2. CLEAN COLUMN NAMES
         df.columns = df.columns.str.strip()
         
-        # Auto-fix Column Name Mismatches
-        rename_map = {
-            'SalePerson': 'SalesPerson', 
-            'Date': 'BillDate',
-            'Bill Date': 'BillDate',
-            'BillDate': 'BillDate'
-        }
+        rename_map = {'SalePerson': 'SalesPerson', 'Date': 'BillDate', 'Bill Date': 'BillDate', 'BillDate': 'BillDate'}
         df.rename(columns=rename_map, inplace=True)
 
-        # 3. CHECK FOR REQUIRED COLUMNS
-        required_columns = ['SalesPerson', 'GSV', 'Category', 'Quantity', 'InvoiceNumber', 'BillDate', 'ProductName']
-        missing_cols = [col for col in required_columns if col not in df.columns]
-        
-        if missing_cols:
-            st.error(f"🚨 **File Error:** Missing columns: {missing_cols}")
-            st.warning("Please make sure you uploaded the **Article Sale Report**.")
-            st.stop()
-
-        # 4. ROBUST DATE CONVERSION
+        # 2. DATE FIX
         df['BillDate'] = pd.to_datetime(df['BillDate'], dayfirst=True, errors='coerce')
         df = df.dropna(subset=['BillDate'])
         
-        if df.empty:
-            st.error("🚨 **Date Error:** All dates failed to load. Please check your CSV date format.")
-            st.stop()
-
-        # --- RETAIL WEEK LOGIC (1-7 = Week 1) ---
+        # 3. WEEK LOGIC
         df['Day_Num'] = df['BillDate'].dt.day
         df['Week'] = (df['Day_Num'] - 1) // 7 + 1
         df['Week_Label'] = "Week " + df['Week'].astype(str)
         df['Day'] = df['BillDate'].dt.strftime('%A')
         
-        # 5. SEPARATE STREAMS
-        
-        # Stream A: MEMBERSHIPS
+        # 4. SEPARATE STREAMS
         mask_mem = df['ProductName'].str.contains('Membership', case=False, na=False) | (df['Category'] == 'GiftCertificate')
         df_memberships = df[mask_mem].copy()
 
-        # Stream B: SALES (Exclude Free Samples)
         exclusions = ['Free Sample Category']
         df_sales = df[~df['Category'].isin(exclusions)].copy()
 
-        # 6. KPI CALCULATIONS (GSV)
-        
-        # Staff Stats
+        # 5. MASTER KPI CALCULATIONS (GSV)
         staff_stats = df_sales.groupby('SalesPerson').agg(
             Total_GSV=('GSV', 'sum'),
             Total_Qty=('Quantity', 'sum')
@@ -108,33 +78,28 @@ if article_file:
 
         bill_counts = df_sales.groupby('SalesPerson')['InvoiceNumber'].nunique().reset_index(name='Total_Bills')
         
-        # Single Bill Analysis
+        # Single Bills
         bill_group = df_sales.groupby(['InvoiceNumber', 'SalesPerson'])['Quantity'].sum().reset_index()
         single_bills = bill_group[bill_group['Quantity'] == 1]
         sb_counts = single_bills.groupby('SalesPerson').size().reset_index(name='Single_Bills')
         
-        # Merge Master
+        # Merge
         master_df = pd.merge(staff_stats, bill_counts, on='SalesPerson', how='left')
         master_df = pd.merge(master_df, sb_counts, on='SalesPerson', how='left').fillna(0)
+        master_df['Total_Bills'] = master_df['Total_Bills'].replace(0, 1)
         
-        # Avoid Division by Zero
-        master_df['Total_Bills'] = master_df['Total_Bills'].replace(0, 1) 
-        
-        # Calculate Incentives
+        # Ratios
         master_df['AVPT'] = (master_df['Total_GSV'] / master_df['Total_Bills']).round(0)
         master_df['AUPT'] = (master_df['Total_Qty'] / master_df['Total_Bills']).round(2)
         master_df['Single_Bill_%'] = ((master_df['Single_Bills'] / master_df['Total_Bills']) * 100).round(1)
 
-        # ADD RANKING
+        # Ranking
         master_df = master_df.sort_values('Total_GSV', ascending=False).reset_index(drop=True)
-        master_df.index = master_df.index + 1
+        master_df.index += 1
         master_df['Rank'] = master_df.index
+        master_df = master_df[['Rank', 'SalesPerson', 'Total_GSV', 'Total_Qty', 'Total_Bills', 'AVPT', 'AUPT', 'Single_Bills', 'Single_Bill_%']]
 
-        # Reorder columns
-        cols = ['Rank', 'SalesPerson', 'Total_GSV', 'Total_Qty', 'Total_Bills', 'AVPT', 'AUPT', 'Single_Bills', 'Single_Bill_%']
-        master_df = master_df[cols]
-
-        # --- VISUALS ---
+        # --- TABS ---
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "🏆 Rankings & Incentives", 
             "🔍 Category Analysis", 
@@ -149,19 +114,14 @@ if article_file:
             
             st.markdown("---")
             st.write("### 🎯 Weekly Incentive Qualifiers (Current Week)")
-            
             if not df['Week'].empty:
                 current_week = df['Week'].max()
                 weekly_df = df_sales[df_sales['Week'] == current_week]
                 
                 if not weekly_df.empty:
-                    w_stats = weekly_df.groupby('SalesPerson').agg(
-                        W_GSV=('GSV', 'sum'), 
-                        W_Qty=('Quantity', 'sum')
-                    ).reset_index()
+                    w_stats = weekly_df.groupby('SalesPerson').agg(W_GSV=('GSV', 'sum'), W_Qty=('Quantity', 'sum')).reset_index()
                     w_bills = weekly_df.groupby('SalesPerson')['InvoiceNumber'].nunique().reset_index(name='W_Bills')
                     w_merged = pd.merge(w_stats, w_bills, on='SalesPerson')
-                    
                     w_merged['W_AVPT'] = (w_merged['W_GSV'] / w_merged['W_Bills'])
                     w_merged['W_AUPT'] = (w_merged['W_Qty'] / w_merged['W_Bills'])
                     
@@ -172,16 +132,15 @@ if article_file:
                         st.dataframe(winners[['SalesPerson', 'W_AVPT', 'W_AUPT']].style.format({'W_AVPT': '₹{:.0f}'}))
                     else:
                         st.warning(f"No winners yet for Week {current_week}.")
-                else:
-                    st.info("No sales data for the current week yet.")
 
-        # --- TAB 2: UPDATED CATEGORY LOGIC ---
+        # --- TAB 2: SIMPLIFIED & TRANSPOSED CATEGORY ANALYSIS ---
         with tab2:
-            st.subheader("🔍 Category & Sub-Category Analysis")
+            st.subheader("🔍 Category & Sub-Category Performance")
             
-            # 1. Selectors
+            # Selectors
             cats = ['All'] + sorted(list(df_sales['Category'].dropna().unique()))
-            col_cat, col_sub = st.columns(2)
+            col_cat, col_sub, col_toggle = st.columns([2, 2, 1])
+            
             selected_cat = col_cat.selectbox("Select Category", cats)
             
             if selected_cat != 'All':
@@ -191,34 +150,51 @@ if article_file:
             
             selected_sub = col_sub.selectbox("Select Sub-Category", sub_cats)
             
-            # 2. Filter Data
+            # Filter Data
             filtered_df = df_sales.copy()
-            if selected_cat != 'All':
-                filtered_df = filtered_df[filtered_df['Category'] == selected_cat]
-            if selected_sub != 'All':
-                filtered_df = filtered_df[filtered_df['SubCategory'] == selected_sub]
+            if selected_cat != 'All': filtered_df = filtered_df[filtered_df['Category'] == selected_cat]
+            if selected_sub != 'All': filtered_df = filtered_df[filtered_df['SubCategory'] == selected_sub]
 
-            # 3. Dynamic Grouping
+            # Calculation
             if not filtered_df.empty:
-                if selected_cat == 'All':
-                    group_cols = ['Category', 'SalesPerson']
-                elif selected_sub == 'All':
-                    group_cols = ['SubCategory', 'SalesPerson']
-                else:
-                    group_cols = ['SalesPerson']
-
-                cat_stats = filtered_df.groupby(group_cols).agg(
-                    Sales_GSV=('GSV', 'sum'),
+                # 1. Calculate Total for this view (to get %)
+                total_view_gsv = filtered_df['GSV'].sum()
+                
+                # 2. Group by Staff
+                cat_stats = filtered_df.groupby('SalesPerson').agg(
+                    Sales=('GSV', 'sum'),
                     Qty=('Quantity', 'sum'),
                     Bills=('InvoiceNumber', 'nunique')
-                ).reset_index().sort_values('Sales_GSV', ascending=False)
+                ).reset_index()
                 
-                cat_stats.reset_index(drop=True, inplace=True)
-                cat_stats.index += 1
-                cat_stats.index.name = 'Rank'
+                # 3. Add Percentage Column
+                cat_stats['Contrib %'] = (cat_stats['Sales'] / total_view_gsv) * 100
                 
-                st.write(f"Showing performance by: **{', '.join(group_cols)}**")
-                st.dataframe(cat_stats.style.format({'Sales_GSV': '₹{:.2f}'}), use_container_width=True)
+                # 4. Sort and Clean
+                cat_stats = cat_stats.sort_values('Sales', ascending=False).set_index('SalesPerson')
+                
+                # 5. TRANSPOSE TOGGLE
+                transpose_view = col_toggle.checkbox("🔄 Transpose View")
+                
+                st.markdown(f"**Total Sales for Selection:** ₹{total_view_gsv:,.2f}")
+                
+                if transpose_view:
+                    # Show Horizontal (Staff Name on Top, KPIs on Side)
+                    st.dataframe(
+                        cat_stats.T.style.format("{:.2f}"), 
+                        use_container_width=True
+                    )
+                else:
+                    # Show Vertical (Staff Name on Side, KPIs on Top)
+                    # Reorder columns to put % next to sales
+                    cat_stats = cat_stats[['Sales', 'Contrib %', 'Qty', 'Bills']]
+                    st.dataframe(
+                        cat_stats.style.format({
+                            'Sales': '₹{:.2f}', 
+                            'Contrib %': '{:.1f}%'
+                        }), 
+                        use_container_width=True
+                    )
                 
             else:
                 st.warning("No data found for this selection.")
@@ -249,7 +225,6 @@ if article_file:
 
     except Exception as e:
         st.error(f"🚨 An error occurred: {e}")
-        st.write("Please send this error message to your developer.")
 
 else:
-    st.info("👈 Please upload the data file in the sidebar to begin.")
+    st.info("👈 Please upload the data file.")
