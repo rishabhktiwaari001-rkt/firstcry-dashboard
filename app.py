@@ -1,17 +1,51 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import os
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="FirstCry Dashboard (Final)", layout="wide")
+st.set_page_config(page_title="FirstCry Store Dashboard", layout="wide")
 
-st.title("🛍️ FirstCry Master Dashboard")
-st.markdown("Upload **Article Sale Report** to generate the performance tracker.")
-
-# --- SIDEBAR: FILE UPLOAD ---
+# --- SIDEBAR: SETTINGS ---
 with st.sidebar:
-    st.header("📂 Data Upload")
+    st.header("⚙️ Dashboard Settings")
+    st.write("Upload Data File below to start.")
+    
+    # DATA UPLOAD (Always required for new reports)
     article_file = st.file_uploader("Upload Article Sale Report (CSV)", type=['csv'])
+
+# --- HEADER LOGIC (AUTO-DETECT IMAGES) ---
+col1, col2, col3 = st.columns([1, 4, 2])
+
+# 1. LOGO HANDLING
+with col1:
+    # Check if 'logo.png' or 'logo.jpg' exists in the folder
+    if os.path.exists("logo.png"):
+        st.image("logo.png", width=150)
+    elif os.path.exists("logo.jpg"):
+        st.image("logo.jpg", width=150)
+    else:
+        # Fallback: Allow upload if file is missing
+        logo_up = st.file_uploader("Upload Logo", type=['png', 'jpg'])
+        if logo_up: st.image(logo_up, width=150)
+
+# 2. TITLE
+with col2:
+    st.title("🛍️ FirstCry Store Dashboard")
+    st.markdown("### Performance & Retail KPIs")
+
+# 3. STORE PHOTO HANDLING
+with col3:
+    # Check if 'store.png' or 'store.jpg' exists
+    if os.path.exists("store.png"):
+        st.image("store.png", width=300)
+    elif os.path.exists("store.jpg"):
+        st.image("store.jpg", width=300)
+    else:
+        # Fallback
+        store_up = st.file_uploader("Upload Store Photo", type=['png', 'jpg'])
+        if store_up: st.image(store_up, width=300)
+
+st.markdown("---")
 
 # --- MAIN LOGIC ---
 if article_file:
@@ -103,7 +137,7 @@ if article_file:
         # --- VISUALS ---
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "🏆 Rankings & Incentives", 
-            "🔍 Category Deep-Dive", 
+            "🔍 Category Analysis", 
             "💳 Membership Hub", 
             "📅 Sales Reports", 
             "⚠️ Single Bills"
@@ -164,27 +198,21 @@ if article_file:
             if selected_sub != 'All':
                 filtered_df = filtered_df[filtered_df['SubCategory'] == selected_sub]
 
-            # 3. Dynamic Grouping (THE FIX)
+            # 3. Dynamic Grouping
             if not filtered_df.empty:
-                # Decide what columns to show based on filters
                 if selected_cat == 'All':
-                    # If looking at ALL, show Breakdown by Category
                     group_cols = ['Category', 'SalesPerson']
                 elif selected_sub == 'All':
-                    # If looking at a Category, show Breakdown by SubCategory
                     group_cols = ['SubCategory', 'SalesPerson']
                 else:
-                    # If looking at specific SubCat, just show Staff
                     group_cols = ['SalesPerson']
 
-                # Perform Aggregation
                 cat_stats = filtered_df.groupby(group_cols).agg(
                     Sales_GSV=('GSV', 'sum'),
                     Qty=('Quantity', 'sum'),
                     Bills=('InvoiceNumber', 'nunique')
                 ).reset_index().sort_values('Sales_GSV', ascending=False)
                 
-                # Add Rank
                 cat_stats.reset_index(drop=True, inplace=True)
                 cat_stats.index += 1
                 cat_stats.index.name = 'Rank'
@@ -224,4 +252,4 @@ if article_file:
         st.write("Please send this error message to your developer.")
 
 else:
-    st.info("Waiting for file...")
+    st.info("👈 Please upload the data file in the sidebar to begin.")
