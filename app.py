@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="FirstCry Store Dashboard", layout="wide")
+st.set_page_config(page_title="FirstCry Chowk Store Dashboard", layout="wide")
 
 # --- SIDEBAR: SETTINGS ---
 with st.sidebar:
